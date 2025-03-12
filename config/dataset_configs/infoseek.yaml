@@ -1,0 +1,4 @@
+dataset:
+  name: infoseek  
+  path: data/processed/infoseek/
+  split: train

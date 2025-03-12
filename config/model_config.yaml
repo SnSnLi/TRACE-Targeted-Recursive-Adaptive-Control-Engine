@@ -1,0 +1,7 @@
+model:
+  name: blip
+  pretrained: Salesforce/blip-image-captioning-base
+  embedding_dim: 512
+  uncertainty_hidden_dim: 256
+  refinement_hidden_dim: 512
+  max_refinement_iterations: 10

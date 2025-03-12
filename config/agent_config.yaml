@@ -1,0 +1,4 @@
+agent:
+  hidden_dim: 256
+  use_uncertainty: true
+  rl_algorithm: ppo 

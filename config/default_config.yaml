@@ -1,0 +1,25 @@
+training:
+  learning_rate: 0.0003
+  batch_size: 32
+  num_episodes: 5000
+  max_steps: 10
+  gamma: 0.99
+  epsilon: 0.2
+  value_coef: 0.5
+  entropy_coef: 0.01
+  eval_frequency: 50
+  save_path: checkpoints/
+  target_metric: hit@1 
+      
+  project_name: "recursive_self_refinement_retrieval"
+  seed: 42
+  device: "cuda"
+  base_model: "Salesforce/blip-image-captioning-base"
+  embedding_dim: 512
+  llm_api:
+  provider: "openai"  # 或 "anthropic", "huggingface" 等
+  model: "gpt-4"
+  temperature: 0.7
+  max_tokens: 256
+  max_iterations: 5
+  uncertainty_threshold: 0.2
