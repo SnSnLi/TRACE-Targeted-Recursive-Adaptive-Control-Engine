@@ -1,6 +1,52 @@
-training:
-  learning_rate: 0.0003
+# 通用配置文件 - 支持所有数据集
+
+# 数据集配置
+dataset:
+  name: 'infoseek'  # 可选: 'infoseek', 'flickr30k', 'vqa', 'viquae'
+  # 通用数据集参数
   batch_size: 32
+  num_workers: 4
+  split: 'train'
+  
+  # 数据集特定参数（根据dataset.name使用对应配置）
+  infoseek:
+    path: 'data/infoseek'
+  
+  flickr30k:
+    path: 'data/flickr30k'
+  
+  vqa:
+    path: 'data/vqa'
+    
+  viquae:
+    jsonl_file: 'data/viquae_dataset/train.jsonl'
+    image_dir: 'data/viquae_dataset/viquae_images'
+
+# 模型配置
+model:
+  base_model: "Salesforce/blip-image-captioning-base"
+  embedding_dim: 768
+  uncertainty_hidden_dim: 512
+
+# Agent配置
+agent:
+  hidden_dim: 256
+  belief_dim: 64
+  uncertainty_threshold: 0.3
+  quality_threshold: 0.8
+
+# 训练配置
+training:
+  mode: 'retriever'  # 'retriever' 或 'agent'
+  learning_rate: 1e-4
+  batch_size: 32
+  num_epochs: 100
+  uncertainty_weight: 0.1
+  target_metric: "recall@10"  # 可选: "recall@10", "accuracy" 等
+  save_frequency: 5
+  save_path: "checkpoints"
+  
+  # Agent训练特定参数
   num_episodes: 5000
   max_steps: 10
   gamma: 0.99
@@ -8,18 +54,23 @@ training:
   value_coef: 0.5
   entropy_coef: 0.01
   eval_frequency: 50
-  save_path: checkpoints/
-  target_metric: hit@1 
-      
-  project_name: "recursive_self_refinement_retrieval"
-  seed: 42
-  device: "cuda"
-  base_model: "Salesforce/blip-image-captioning-base"
-  embedding_dim: 512
-  llm_api:
+
+# LLM配置
+llm_api:
   provider: "openai"  # 或 "anthropic", "huggingface" 等
   model: "gpt-4"
   temperature: 0.7
   max_tokens: 256
   max_iterations: 5
   uncertainty_threshold: 0.2
+
+# 日志配置
+logging:
+  log_dir: 'logs'
+  tensorboard: true
+  log_frequency: 10
+
+# 其他通用配置
+project_name: "recursive_self_refinement_retrieval"
+seed: 42
+device: "cuda"  # 'cuda' 或 'cpu'
