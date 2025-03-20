@@ -1,17 +1,18 @@
 import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import torch.nn.functional as F
 from models.base_retrieval.blip_model import BLIPRetriever
 from models.uncertainty.estimator import UncertaintyEstimator
 from models.refinement.recursive_model import RecursiveRefinementModel
 from agents.meta_controller import MetaController
-import matplotlib.pyplot as plt
-import numpy as np
 
 class RecursiveRetrievalPredictor:
     def __init__(self, config, model_path, agent_path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Load models
-        self.base_retriever = BLIPRetriever(config['model'])
+        self.base_retriever = BLIPRetriever(config['model'])  # 基础BLIP检索模型
         
         self.uncertainty_estimator = UncertaintyEstimator(
             embedding_dim=config['model']['embedding_dim'],
@@ -37,36 +38,75 @@ class RecursiveRetrievalPredictor:
         self.recursive_model.eval()
         self.meta_controller.eval()
         
-    def predict(self, query, candidates, max_iterations=10, visualize=False):
-        """Perform recursive self-refinement retrieval."""
+    def predict(self, query, candidates, image=None, max_iterations=10, visualize=False):
+        """执行递归自我完善检索。如果提供图像，则执行ViQuAE流程。"""
         with torch.no_grad():
-            # Encode query
-            query_emb = self.base_retriever.encode_text(query) if isinstance(query, str) else self.base_retriever.encode_image(query)
-            
-            # Initial retrieval
-            results = self.base_retriever.retrieve(query, candidates)
-            top_result, top_score = results[0]
-            
-            results_history = [results]
+            # 根据输入类型选择流程
+            if isinstance(query, str) and isinstance(candidates, (list, tuple)) and len(candidates) > 0:
+                # ViQuAE 模式：query为文本问题，image在外部提供的情况下
+                query_text = query
+                query_image = None
+                # 如果候选提供的是 (文本候选列表, 图像) 二元组
+                if isinstance(candidates, tuple) or (isinstance(candidates, list) and isinstance(candidates[0], tuple)):
+                    # 若 candidates 是 (kb_texts, image)
+                    kb_texts, query_image = candidates if isinstance(candidates, tuple) else candidates[0]
+                else:
+                    kb_texts = candidates
+                    # 尝试从参数获取图像（如果用户通过参数 image 传入）
+                    query_image = image
+            else:
+                query_text = query if isinstance(query, str) else None
+                query_image = query if not isinstance(query, str) else image
+                kb_texts = candidates
+
+            # 1. 文本 -> 知识库初步检索（如果有文本查询和候选知识库文本）
+            if query_text is not None and kb_texts:
+                # 编码查询文本
+                query_text_emb = self.base_retriever.encode_text(query_text)
+                # 批量编码候选文本
+                cand_text_embs = [self.base_retriever.encode_text(text) for text in kb_texts]
+                # 计算相似度并排序候选 (文本 query vs 文本候选)
+                sim_scores = [float((query_text_emb @ cand_emb.T).item()) for cand_emb in cand_text_embs]
+                ranked_idx = sorted(range(len(sim_scores)), key=lambda i: sim_scores[i], reverse=True)
+                # 选取 Top-K 候选用于下一步（例如5或10）
+                K = min(10, len(ranked_idx))
+                topk_idx = ranked_idx[:K]
+                topk_texts = [kb_texts[i] for i in topk_idx]
+                topk_text_embs = [cand_text_embs[i] for i in topk_idx]
+            else:
+                topk_texts = kb_texts  # 无文本检索步骤，直接使用提供的候选
+                topk_text_embs = [self.base_retriever.encode_text(text) for text in topk_texts]
+
+            # 2. 图像 -> 文本匹配检索
+            if query_image is not None:
+                query_img_emb = self.base_retriever.encode_image(query_image)
+                # 计算图像与每个候选文本的相似度
+                sim_scores_img = [(query_img_emb @ txt_emb.T).item() for txt_emb in topk_text_embs]
+                best_idx = int(np.argmax(sim_scores_img))
+            else:
+                best_idx = 0
+
+            top_result = topk_texts[best_idx]
+            top_score = float(np.max(sim_scores_img)) if query_image is not None else (sim_scores[best_idx] if topk_texts else 0.0)
+            results_history = [ [(text, 0.0) for text in topk_texts] ]
             uncertainties = []
-            
-            # Get embedding for top result
-            top_result_emb = self.base_retriever.encode_text(top_result) if isinstance(top_result, str) else self.base_retriever.encode_image(top_result)
-            
-            # Estimate uncertainty
-            uncertainty = self.uncertainty_estimator(query_emb, top_result_emb)
+            # 计算初始嵌入及不确定性
+            query_emb = query_img_emb if query_image is not None else (query_text_emb if query_text is not None else None)
+            top_result_emb = topk_text_embs[best_idx]
+            uncertainty = self.uncertainty_estimator(query_emb.unsqueeze(0), top_result_emb.unsqueeze(0))
             uncertainties.append(uncertainty.item())
             
-            # Recursive refinement
+            # 3. 递归检索循环
             iteration = 0
             done = False
             
             while not done and iteration < max_iterations:
                 # Get action from meta-controller
-                action = self.meta_controller.act(
+                action, _ = self.meta_controller.act(
                     query_emb.unsqueeze(0),
                     top_result_emb.unsqueeze(0),
-                    torch.tensor([uncertainty.item()]).unsqueeze(0).unsqueeze(0),
+                    torch.tensor([[uncertainty.item()]]),
+                    quality=top_score if 'top_score' in locals() else None,
                     deterministic=True
                 )
                 
@@ -86,7 +126,7 @@ class RecursiveRetrievalPredictor:
                 ).squeeze(0)
                 
                 # Retrieve with refined embedding
-                new_results = self.recursive_model.retrieve_with_embedding(refined_query_emb, candidates)
+                new_results = self.recursive_model.retrieve_with_embedding(refined_query_emb, topk_texts)
                 results_history.append(new_results)
                 
                 # Update top result
