@@ -2,7 +2,7 @@
 
 # 数据集配置
 dataset:
-  name: 'infoseek'  # 可选: 'infoseek', 'flickr30k', 'vqa', 'viquae'
+  name: 'viquae'  # 可选: 'infoseek', 'flickr30k', 'vqa', 'viquae'
   # 通用数据集参数
   batch_size: 32
   num_workers: 4
